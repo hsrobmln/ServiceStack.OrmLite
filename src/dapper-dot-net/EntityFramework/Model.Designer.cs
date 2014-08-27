@@ -8,15 +8,15 @@
 //------------------------------------------------------------------------------
 
 using System;
+using System.ComponentModel;
+using System.Data.EntityClient;
 using System.Data.Objects;
 using System.Data.Objects.DataClasses;
-using System.Data.EntityClient;
-using System.ComponentModel;
-using System.Xml.Serialization;
+using System.Linq;
 using System.Runtime.Serialization;
+using System.Xml.Serialization;
 
 [assembly: EdmSchemaAttribute()]
-
 namespace SqlMapper.EntityFramework
 {
     #region Contexts
@@ -82,6 +82,7 @@ namespace SqlMapper.EntityFramework
         private ObjectSet<Post> _Posts;
 
         #endregion
+
         #region AddTo Methods
     
         /// <summary>
@@ -93,11 +94,11 @@ namespace SqlMapper.EntityFramework
         }
 
         #endregion
+
     }
-    
 
     #endregion
-    
+
     #region Entities
     
     /// <summary>
@@ -128,6 +129,7 @@ namespace SqlMapper.EntityFramework
         }
 
         #endregion
+
         #region Primitive Properties
     
         /// <summary>
@@ -446,9 +448,11 @@ namespace SqlMapper.EntityFramework
         partial void OnCounter9Changed();
 
         #endregion
+
     
     }
 
     #endregion
+
     
 }

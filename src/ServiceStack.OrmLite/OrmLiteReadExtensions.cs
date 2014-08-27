@@ -846,15 +846,15 @@ namespace ServiceStack.OrmLite
         {
             var refField = GetRefFieldDefIfExists(modelDef, refModelDef);
             if (refField == null)
-                throw new ArgumentException("Cant find '{0}' Property on Type '{1}'".Fmt(modelDef.ModelName + "Id", refType.Name));
+                throw new ArgumentException("Cant find '{0}' Property on Type '{1}'".Fmt(modelDef.ModelName + OrmLiteConfig.IdField, refType.Name));
             return refField;
         }
 
         public static FieldDefinition GetRefFieldDefIfExists(ModelDefinition modelDef, ModelDefinition refModelDef)
         {
-            var refNameConvention = modelDef.ModelName + "Id";
+            var refNameConvention = modelDef.ModelName + OrmLiteConfig.IdField;
             var refField = refModelDef.FieldDefinitions.FirstOrDefault(x => x.FieldName == refNameConvention)
-                           ?? refModelDef.FieldDefinitions.FirstOrDefault(x => x.Name == modelDef.Name + "Id");
+                           ?? refModelDef.FieldDefinitions.FirstOrDefault(x => x.Name == modelDef.Name + OrmLiteConfig.IdField);
             return refField;
         }
     }

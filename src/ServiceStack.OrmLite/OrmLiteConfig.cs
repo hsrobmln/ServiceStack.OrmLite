@@ -17,7 +17,7 @@ namespace ServiceStack.OrmLite
 {
     public static class OrmLiteConfig
     {
-        public const string IdField = "Id";
+        public const string IdField = "ID";
 
         private const int defaultCommandTimeout = 30;
         private static int? commandTimeout;
