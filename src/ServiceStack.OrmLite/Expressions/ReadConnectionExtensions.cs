@@ -217,5 +217,41 @@ namespace ServiceStack.OrmLite
             var expression = OrmLiteConfig.DialectProvider.SqlExpression<T>();
             return dbConn.Exec(dbCmd => dbCmd.Count(expression));
         }
+
+
+        /// <summary>
+        /// Returns results with references from using a LINQ Expression. E.g:
+        /// <para>db.LoadSelect&lt;Person&gt;(x =&gt; x.Age &gt; 40)</para>
+        /// </summary>
+        public static List<T> LoadSelect<T>(this IDbConnection dbConn, Expression<Func<T, bool>> predicate)
+        {
+            return dbConn.Exec(dbCmd => dbCmd.LoadSelect(predicate));
+        }
+
+        /// <summary>
+        /// Returns results with references from using an SqlExpression lambda. E.g:
+        /// <para>db.LoadSelect&lt;Person&gt;(q =&gt; q.Where(x =&gt; x.Age &gt; 40))</para>
+        /// </summary>
+        public static List<T> LoadSelect<T>(this IDbConnection dbConn, Func<SqlExpression<T>, SqlExpression<T>> expression)
+        {
+            return dbConn.Exec(dbCmd => dbCmd.LoadSelect(expression));
+        }
+
+        /// <summary>
+        /// Returns results with references from using an SqlExpression lambda. E.g:
+        /// <para>db.LoadSelect(db.From&lt;Person&gt;().Where(x =&gt; x.Age &gt; 40))</para>
+        /// </summary>
+        public static List<T> LoadSelect<T>(this IDbConnection dbConn, SqlExpression<T> expression = null)
+        {
+            return dbConn.Exec(dbCmd => dbCmd.LoadSelect(expression));
+        }
+
+        /// <summary>
+        /// Project results with references from a number of joined tables into a different model
+        /// </summary>
+        public static List<Into> LoadSelect<Into, From>(this IDbConnection dbConn, SqlExpression<From> expression)
+        {
+            return dbConn.Exec(dbCmd => dbCmd.LoadSelect<Into, From>(expression));
+        }
     }
 }

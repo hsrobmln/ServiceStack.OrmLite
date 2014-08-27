@@ -1,7 +1,10 @@
 ﻿using System.Data;
 using System.Linq;
 using NUnit.Framework;
+using ServiceStack.DataAnnotations;
+using ServiceStack.Model;
 using ServiceStack.OrmLite.Tests.UseCase;
+using ServiceStack.Text;
 
 namespace ServiceStack.OrmLite.Tests
 {
@@ -158,38 +161,7 @@ namespace ServiceStack.OrmLite.Tests
         [Test]
         public void Can_do_joins_with_complex_wheres_using_SqlExpression()
         {
-            var customers = new[]
-            {
-                new Customer
-                {
-                    Name = "Customer 1",
-                    PrimaryAddress = new CustomerAddress {
-                        AddressLine1 = "1 Australia Street",
-                        Country = "Australia"
-                    },
-                    Orders = new[] {
-                        new Order { LineItem = "Line 1", Qty = 1, Cost = 1.99m },
-                        new Order { LineItem = "Line 1", Qty = 2, Cost = 3.98m },
-                        new Order { LineItem = "Line 2", Qty = 1, Cost = 1.49m },
-                        new Order { LineItem = "Line 2", Qty = 2, Cost = 2.98m },
-                        new Order { LineItem = "Australia Flag", Qty = 1, Cost = 9.99m },
-                    }.ToList(),
-                },
-                new Customer
-                {
-                    Name = "Customer 2",
-                    PrimaryAddress = new CustomerAddress {
-                        AddressLine1 = "2 Prospect Park",
-                        Country = "USA"
-                    },
-                    Orders = new[] {
-                        new Order { LineItem = "USA", Qty = 1, Cost = 20m },
-                    }.ToList(),
-                },
-            };
-
-            customers.Each(c =>
-                db.Save(c, references: true));
+            var customers = AddCustomersWithOrders();
 
             db.Insert(
                 new Country { CountryName = "Australia", CountryCode = "AU" },
@@ -205,7 +177,7 @@ namespace ServiceStack.OrmLite.Tests
             var costs = results.ConvertAll(x => x.Cost);
             Assert.That(costs, Is.EquivalentTo(new[] { 1.99m, 1.49m, 9.99m }));
             var orderIds = results.ConvertAll(x => x.OrderId);
-            var expectedOrderIds = new []{customers[0].Orders[0].Id, customers[0].Orders[2].Id, customers[0].Orders[4].Id};
+            var expectedOrderIds = new[] { customers[0].Orders[0].Id, customers[0].Orders[2].Id, customers[0].Orders[4].Id };
             Assert.That(orderIds, Is.EquivalentTo(expectedOrderIds));
 
             //Same as above using using db.From<Customer>()
@@ -240,39 +212,52 @@ namespace ServiceStack.OrmLite.Tests
             Assert.That(countryResults.ConvertAll(x => x.CountryCode), Is.EquivalentTo(new[] { "US" }));
         }
 
-        [Test]
-        public void Can_do_LeftJoins_using_SqlExpression()
+        private Customer[] AddCustomersWithOrders()
         {
             var customers = new[]
             {
                 new Customer
                 {
                     Name = "Customer 1",
-                    PrimaryAddress = new CustomerAddress {
+                    PrimaryAddress = new CustomerAddress
+                    {
                         AddressLine1 = "1 Australia Street",
                         Country = "Australia"
                     },
+                    Orders = new[]
+                    {
+                        new Order {LineItem = "Line 1", Qty = 1, Cost = 1.99m},
+                        new Order {LineItem = "Line 1", Qty = 2, Cost = 3.98m},
+                        new Order {LineItem = "Line 2", Qty = 1, Cost = 1.49m},
+                        new Order {LineItem = "Line 2", Qty = 2, Cost = 2.98m},
+                        new Order {LineItem = "Australia Flag", Qty = 1, Cost = 9.99m},
+                    }.ToList(),
                 },
                 new Customer
                 {
                     Name = "Customer 2",
-                    PrimaryAddress = new CustomerAddress {
-                        AddressLine1 = "2 America Street",
+                    PrimaryAddress = new CustomerAddress
+                    {
+                        AddressLine1 = "2 Prospect Park",
                         Country = "USA"
                     },
-                },
-                new Customer
-                {
-                    Name = "Customer 3",
-                    PrimaryAddress = new CustomerAddress {
-                        AddressLine1 = "3 Canada Street",
-                        Country = "Canada"
-                    },
+                    Orders = new[]
+                    {
+                        new Order {LineItem = "USA", Qty = 1, Cost = 20m},
+                    }.ToList(),
                 },
             };
 
             customers.Each(c =>
                 db.Save(c, references: true));
+
+            return customers;
+        }
+
+        [Test]
+        public void Can_do_LeftJoins_using_SqlExpression()
+        {
+            AddCustomers();
 
             db.Insert(
                 new Country { CountryName = "Australia", CountryCode = "AU" },
@@ -306,6 +291,43 @@ namespace ServiceStack.OrmLite.Tests
                 .LeftJoin<CustomerAddress, Customer>());
 
             Assert.That(dbAddresses.Count, Is.EqualTo(3));
+        }
+
+        private void AddCustomers()
+        {
+            var customers = new[]
+            {
+                new Customer
+                {
+                    Name = "Customer 1",
+                    PrimaryAddress = new CustomerAddress
+                    {
+                        AddressLine1 = "1 Australia Street",
+                        Country = "Australia"
+                    },
+                },
+                new Customer
+                {
+                    Name = "Customer 2",
+                    PrimaryAddress = new CustomerAddress
+                    {
+                        AddressLine1 = "2 America Street",
+                        Country = "USA"
+                    },
+                },
+                new Customer
+                {
+                    Name = "Customer 3",
+                    PrimaryAddress = new CustomerAddress
+                    {
+                        AddressLine1 = "3 Canada Street",
+                        Country = "Canada"
+                    },
+                },
+            };
+
+            customers.Each(c =>
+                db.Save(c, references: true));
         }
 
         [Test]
@@ -413,7 +435,7 @@ namespace ServiceStack.OrmLite.Tests
             Assert.That(addressIds, Is.EquivalentTo(expectedAddressIds));
 
             var orderIds = results.ConvertAll(x => x.OrderId);
-            var expectedOrderIds = new[] {customer.Orders[0].Id, customer.Orders[1].Id};
+            var expectedOrderIds = new[] { customer.Orders[0].Id, customer.Orders[1].Id };
             Assert.That(orderIds, Is.EquivalentTo(expectedOrderIds));
 
             var customerNames = results.ConvertAll(x => x.CustomerName);
@@ -474,5 +496,140 @@ namespace ServiceStack.OrmLite.Tests
             var countryIds = results.Map(x => x.CountryId);
             Assert.That(countryIds, Is.EquivalentTo(new[] { countries[0].Id, countries[1].Id }));
         }
+
+        [Test]
+        public void Can_LeftJoin_and_select_empty_relation()
+        {
+            AddCustomerWithOrders();
+
+            var customer = new Customer
+            {
+                Name = "Customer 2",
+                PrimaryAddress = new CustomerAddress
+                {
+                    AddressLine1 = "2 America Street",
+                    Country = "USA"
+                },
+            };
+
+            db.Save(customer, references: true);
+
+            var q = db.From<Customer>();
+            q.LeftJoin<Order>()
+             .Where<Order>(o => o.Id == null);
+
+            var customers = db.Select(q);
+
+            Assert.That(customers.Count, Is.EqualTo(1));
+            Assert.That(customers[0].Name, Is.EqualTo("Customer 2"));
+        }
+
+        [Test]
+        public void Can_load_list_of_references()
+        {
+            AddCustomersWithOrders();
+
+            var results = db.LoadSelect<Customer>();
+            Assert.That(results.Count, Is.EqualTo(2));
+            Assert.That(results.All(x => x.PrimaryAddress != null));
+            Assert.That(results.All(x => x.Orders.Count > 0));
+
+            var customer1 = results.First(x => x.Name == "Customer 1");
+            Assert.That(customer1.PrimaryAddress.Country, Is.EqualTo("Australia"));
+            Assert.That(customer1.Orders.Select(x => x.Cost),
+                Is.EquivalentTo(new[] { 1.99m, 3.98m, 1.49m, 2.98m, 9.99m }));
+
+            var customer2 = results.First(x => x.Name == "Customer 2");
+            Assert.That(customer2.PrimaryAddress.Country, Is.EqualTo("USA"));
+            Assert.That(customer2.Orders[0].LineItem, Is.EqualTo("USA"));
+
+            results = db.LoadSelect<Customer>(q => q.Name == "Customer 1");
+            Assert.That(results.Count, Is.EqualTo(1));
+            Assert.That(results[0].PrimaryAddress.Country, Is.EqualTo("Australia"));
+            Assert.That(results[0].Orders.Select(x => x.Cost),
+                Is.EquivalentTo(new[] { 1.99m, 3.98m, 1.49m, 2.98m, 9.99m }));
+        }
+
+        [Test]
+        public void Can_join_on_references_attribute()
+        {
+            // Drop tables in order that FK allows
+            db.DropTable<TABLE_3>();
+            db.DropTable<TABLE_2>();
+            db.DropTable<TABLE_1>();
+            db.CreateTable<TABLE_1>();
+            db.CreateTable<TABLE_2>();
+            db.CreateTable<TABLE_3>();
+
+            var id1 = db.Insert(new TABLE_1 { One = "A" }, selectIdentity: true);
+            var id2 = db.Insert(new TABLE_1 { One = "B" }, selectIdentity: true);
+
+            db.Insert(new TABLE_2 { Three = "C", TableOneKey = (int) id1 });
+
+            var q = db.From<TABLE_1>()
+                      .Join<TABLE_2>();
+            var results = db.Select(q);
+
+            Assert.That(results.Count, Is.EqualTo(1));
+            Assert.That(results[0].One, Is.EqualTo("A"));
+
+            var row3 = new TABLE_3 {
+                Three = "3a",
+                TableTwo = new TABLE_2 
+                {
+                    Three = "3b",
+                    TableOneKey = (int)id1,
+                }
+            };
+            db.Save(row3, references:true);
+
+            Assert.That(row3.TableTwoKey, Is.EqualTo(row3.TableTwo.Id));
+
+            row3 = db.LoadSingleById<TABLE_3>(row3.Id);
+            Assert.That(row3.TableTwoKey, Is.EqualTo(row3.TableTwo.Id));
+        }
+    }
+
+    [Alias("Table1")]
+    public class TABLE_1 : IHasId<int>
+    {
+        [AutoIncrement]
+        [Alias("Key")]
+        public int Id { get; set; }
+
+        [Alias("Ena")]
+        public string One { get; set; }
+    }
+
+    [Alias("Table2")]
+    public class TABLE_2 : IHasId<int>
+    {
+        [AutoIncrement]
+        [Alias("Key")]
+        public int Id { get; set; }
+
+        [Alias("Tri")]
+        public string Three { get; set; }
+
+        [References(typeof(TABLE_1))]
+        [Alias("Table1")]
+        public int TableOneKey { get; set; }
+    }
+
+    [Alias("Table3")]
+    public class TABLE_3 : IHasId<int>
+    {
+        [AutoIncrement]
+        [Alias("Key")]
+        public int Id { get; set; }
+
+        [Alias("Tri")]
+        public string Three { get; set; }
+
+        [References(typeof(TABLE_2))]
+        public int? TableTwoKey { get; set; }
+
+        [Reference]
+        public TABLE_2 TableTwo { get; set; }
     }
 }

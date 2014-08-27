@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using NUnit.Framework;
 using ServiceStack.DataAnnotations;
+using ServiceStack.OrmLite.Tests.UseCase;
 using ServiceStack.Text;
 
 namespace ServiceStack.OrmLite.Tests.Expression
@@ -250,24 +252,64 @@ namespace ServiceStack.OrmLite.Tests.Expression
                 db.DropAndCreateTable<LetterFrequency>();
                 db.DropAndCreateTable<LetterStat>();
 
-                var i = 0;
+                var insertedIds = new List<long>();
                 "A,B,B,C,C,C,D,D,E".Split(',').Each(letter => {
-                    db.Insert(new LetterFrequency { Letter = letter }, selectIdentity: true);
+                    insertedIds.Add(db.Insert(new LetterFrequency { Letter = letter }, selectIdentity: true));
                 });
 
                 var rows = db.Select<LetterFrequency>(q => q.OrderByFields("Letter", "Id"));
                 Assert.That(rows.Map(x => x.Letter), Is.EquivalentTo("A,B,B,C,C,C,D,D,E".Split(',')));
-                Assert.That(rows.Map(x => x.Id), Is.EquivalentTo("1,2,3,4,5,6,7,8,9".Split(',').Map(int.Parse)));
+                Assert.That(rows.Map(x => x.Id), Is.EquivalentTo(insertedIds));
 
                 rows = db.Select<LetterFrequency>(q => q.OrderByFields("Letter", "-Id"));
                 Assert.That(rows.Map(x => x.Letter), Is.EquivalentTo("A,B,B,C,C,C,D,D,E".Split(',')));
-                Assert.That(rows.Map(x => x.Id), Is.EquivalentTo("1,3,2,6,5,4,8,7,9".Split(',').Map(int.Parse)));
+                Assert.That(rows.Map(x => x.Id), Is.EquivalentTo(insertedIds));
 
                 rows = db.Select<LetterFrequency>(q => q.OrderByFieldsDescending("Letter", "-Id"));
                 Assert.That(rows.Map(x => x.Letter), Is.EquivalentTo("E,D,D,C,C,C,B,B,A".Split(',')));
-                Assert.That(rows.Map(x => x.Id), Is.EquivalentTo("9,7,8,4,5,6,2,3,1".Split(',').Map(int.Parse)));
+                Assert.That(rows.Map(x => x.Id), Is.EquivalentTo(Enumerable.Reverse(insertedIds)));
             }
+        }
 
+        [Test]
+        public void Can_select_limit_on_Table_with_References()
+        {
+            using (var db = OpenDbConnection())
+            {
+                CustomerOrdersUseCase.DropTables(db); //Has conflicting 'Order' table
+                db.DropAndCreateTable<Order>();
+                db.DropAndCreateTable<Customer>();
+                db.DropAndCreateTable<CustomerAddress>();
+
+                var customer1 = LoadReferencesTests.GetCustomerWithOrders("1");
+                db.Save(customer1, references: true);
+
+                var customer2 = LoadReferencesTests.GetCustomerWithOrders("2");
+                db.Save(customer2, references: true);
+
+                var results = db.LoadSelect<Customer>(q => q
+                    .OrderBy(x => x.Id)
+                    .Limit(1, 1));
+
+                //db.GetLastSql().Print();
+
+                Assert.That(results.Count, Is.EqualTo(1));
+                Assert.That(results[0].Name, Is.EqualTo("Customer 2"));
+                Assert.That(results[0].PrimaryAddress.AddressLine1, Is.EqualTo("2 Humpty Street"));
+                Assert.That(results[0].Orders.Count, Is.EqualTo(2));
+
+                results = db.LoadSelect<Customer>(q => q
+                    .Join<CustomerAddress>()
+                    .OrderBy(x => x.Id)
+                    .Limit(1, 1));
+
+                db.GetLastSql().Print();
+
+                Assert.That(results.Count, Is.EqualTo(1));
+                Assert.That(results[0].Name, Is.EqualTo("Customer 2"));
+                Assert.That(results[0].PrimaryAddress.AddressLine1, Is.EqualTo("2 Humpty Street"));
+                Assert.That(results[0].Orders.Count, Is.EqualTo(2));
+            }
         }
     }
 }

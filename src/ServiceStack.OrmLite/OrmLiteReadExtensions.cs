@@ -138,17 +138,35 @@ namespace ServiceStack.OrmLite
             dbCmd.Parameters.Clear();
             lastQueryType = null;
 
+            var dialectProvider = OrmLiteConfig.DialectProvider;
+            var fieldMap = typeof(T).IsUserType() //Ensure T != Scalar<int>()
+                ? dialectProvider.GetFieldDefinitionMap(typeof(T).GetModelDefinition())
+                : null;
+
             anonType.ForEachParam<T>(excludeDefaults, (pi, columnName, value) =>
             {
                 var p = dbCmd.CreateParameter();
                 p.ParameterName = columnName;
-                p.DbType = OrmLiteConfig.DialectProvider.GetColumnDbType(pi.PropertyType);
+                p.DbType = dialectProvider.GetColumnDbType(pi.PropertyType);
                 p.Direction = ParameterDirection.Input;
+
+                FieldDefinition fieldDef;
+                if (fieldMap != null && fieldMap.TryGetValue(columnName, out fieldDef))
+                {
+                    value = dialectProvider.GetFieldValue(fieldDef, value);
+                    var valueType = value != null ? value.GetType() : null;
+                    if (valueType != null && valueType != pi.PropertyType)
+                    {
+                        p.DbType = dialectProvider.GetColumnDbType(valueType);
+                    }
+                }
+
                 p.Value = value == null ?
                     DBNull.Value
                   : p.DbType == DbType.String ?
                     value.ToString() :
                     value;
+
                 dbCmd.Parameters.Add(p);
             });
         }
@@ -378,6 +396,14 @@ namespace ServiceStack.OrmLite
             return dbCmd.ConvertToList<T>();
         }
 
+        internal static List<T> SqlList<T>(this IDbCommand dbCmd, string sql, Action<IDbCommand> dbCmdFilter)
+        {
+            if (dbCmdFilter != null) dbCmdFilter(dbCmd);
+            dbCmd.CommandText = sql;
+
+            return dbCmd.ConvertToList<T>();
+        }
+
         internal static List<T> SqlColumn<T>(this IDbCommand dbCmd, string sql, object anonType = null)
         {
             if (anonType != null) dbCmd.SetParameters<T>(anonType, excludeDefaults: false);
@@ -421,7 +447,7 @@ namespace ServiceStack.OrmLite
 
         internal static List<T> SelectNonDefaults<T>(this IDbCommand dbCmd, string sql, object anonType = null)
         {
-            if (anonType != null) dbCmd.SetParameters<T>(anonType, excludeDefaults: false);
+            if (anonType != null) dbCmd.SetParameters<T>(anonType, excludeDefaults:true);
 
             return dbCmd.ConvertToList<T>(OrmLiteConfig.DialectProvider.ToSelectStatement(typeof(T), sql));
         }
@@ -449,6 +475,34 @@ namespace ServiceStack.OrmLite
                     var row = OrmLiteUtilExtensions.CreateInstance<T>();
                     row.PopulateWithSqlReader(reader, fieldDefs, indexCache);
                     yield return row;
+                }
+            }
+        }
+
+        internal static IEnumerable<T> ColumnLazy<T>(this IDbCommand dbCmd, string sql, object anonType = null)
+        {
+            if (anonType != null) dbCmd.SetParameters<T>(anonType, excludeDefaults: false);
+            var dialectProvider = OrmLiteConfig.DialectProvider;
+            dbCmd.CommandText = dialectProvider.ToSelectStatement(typeof(T), sql);
+
+            if (OrmLiteConfig.ResultsFilter != null)
+            {
+                foreach (var item in OrmLiteConfig.ResultsFilter.GetColumn<T>(dbCmd))
+                {
+                    yield return item;
+                }
+                yield break;
+            }
+
+            using (var reader = dbCmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    var value = dialectProvider.ConvertDbValue(reader.GetValue(0), typeof(T));
+                    if (value == DBNull.Value)
+                        yield return default(T);
+                    else
+                        yield return (T)value;
                 }
             }
         }
@@ -773,16 +827,31 @@ namespace ServiceStack.OrmLite
                 {
                     var refType = fieldDef.FieldType;
                     var refModelDef = refType.GetModelDefinition();
-                    var refField = GetRefFieldDef(modelDef, refModelDef, fieldDef.FieldType);
+
+                    var refSelf = GetSelfRefFieldDefIfExists(modelDef, refModelDef);
 
                     var result = fieldDef.GetValue(instance);
+                    var refField = refSelf == null
+                        ? GetRefFieldDef(modelDef, refModelDef, refType)
+                        : GetRefFieldDefIfExists(modelDef, refModelDef);
+
                     if (result != null)
                     {
+                        if (refField != null)
                         refField.SetValueFn(result, pkValue);
+    
                         dbCmd.CreateTypedApi(refType).Save(result);
+
+                        //Save Self Table.RefTableId PK
+                        if (refSelf != null)
+                        {
+                            var refPkValue = refModelDef.PrimaryKey.GetValue(result);
+                            refSelf.SetValueFn(instance, refPkValue);
+                            dbCmd.Update(instance);
                     }
                 }
             }
+        }
         }
 
         public static void SaveReferences<T, TRef>(this IDbCommand dbCmd, T instance, params TRef[] refs)
@@ -793,14 +862,30 @@ namespace ServiceStack.OrmLite
             var refType = typeof(TRef);
             var refModelDef = ModelDefinition<TRef>.Definition;
 
+            var refSelf = GetSelfRefFieldDefIfExists(modelDef, refModelDef);
+
             foreach (var oRef in refs)
             {
-                var refField = GetRefFieldDef(modelDef, refModelDef, refType);
+                var refField = refSelf == null 
+                    ? GetRefFieldDef(modelDef, refModelDef, refType)
+                    : GetRefFieldDefIfExists(modelDef, refModelDef);
 
+                if (refField != null)
                 refField.SetValueFn(oRef, pkValue);
             }
 
             dbCmd.SaveAll(refs);
+
+            foreach (var oRef in refs)
+            {
+                //Save Self Table.RefTableId PK
+                if (refSelf != null)
+                {
+                    var refPkValue = refModelDef.PrimaryKey.GetValue(oRef);
+                    refSelf.SetValueFn(instance, refPkValue);
+                    dbCmd.Update(instance);
+        }
+            }
         }
 
         public static void LoadReferences<T>(this IDbCommand dbCmd, T instance)
@@ -808,7 +893,7 @@ namespace ServiceStack.OrmLite
             var modelDef = ModelDefinition<T>.Definition;
             var fieldDefs = modelDef.AllFieldDefinitionsArray.Where(x => x.IsReference);
             var pkValue = modelDef.PrimaryKey.GetValue(instance);
-            var ormLiteDialectProvider = OrmLiteConfig.DialectProvider;
+            var dialectProvider = OrmLiteConfig.DialectProvider;
 
             foreach (var fieldDef in fieldDefs)
             {
@@ -821,8 +906,8 @@ namespace ServiceStack.OrmLite
 
                     var refField = GetRefFieldDef(modelDef, refModelDef, refType);
 
-                    var sqlFilter = ormLiteDialectProvider.GetQuotedColumnName(refField.FieldName) + "={0}";
-                    var sql = ormLiteDialectProvider.ToSelectStatement(refType, sqlFilter, pkValue);
+                    var sqlFilter = dialectProvider.GetQuotedColumnName(refField.FieldName) + "={0}";
+                    var sql = dialectProvider.ToSelectStatement(refType, sqlFilter, pkValue);
 
                     var results = dbCmd.ConvertToList(refType, sql);
                     fieldDef.SetValueFn(instance, results);
@@ -831,15 +916,159 @@ namespace ServiceStack.OrmLite
                 {
                     var refType = fieldDef.FieldType;
                     var refModelDef = refType.GetModelDefinition();
-                    var refField = GetRefFieldDef(modelDef, refModelDef, fieldDef.FieldType);
 
-                    var sqlFilter = ormLiteDialectProvider.GetQuotedColumnName(refField.FieldName) + "={0}";
-                    var sql = ormLiteDialectProvider.ToSelectStatement(refType, sqlFilter, pkValue);
+                    var refSelf = GetSelfRefFieldDefIfExists(modelDef, refModelDef);
+                    var refField = refSelf == null 
+                        ? GetRefFieldDef(modelDef, refModelDef, refType)
+                        : GetRefFieldDefIfExists(modelDef, refModelDef);
 
+                    if (refField != null)
+                    {
+                        var sqlFilter = dialectProvider.GetQuotedColumnName(refField.FieldName) + "={0}";
+                        var sql = dialectProvider.ToSelectStatement(refType, sqlFilter, pkValue);
                     var result = dbCmd.ConvertTo(refType, sql);
                     fieldDef.SetValueFn(instance, result);
                 }
+                    else if (refSelf != null)
+                    {
+                        //Load Self Table.RefTableId PK
+                        var refPkValue = refSelf.GetValue(instance);
+                        var sqlFilter = dialectProvider.GetQuotedColumnName(refModelDef.PrimaryKey.FieldName) + "={0}";
+                        var sql = dialectProvider.ToSelectStatement(refType, sqlFilter, refPkValue);
+                        var result = dbCmd.ConvertTo(refType, sql);
+                        fieldDef.SetValueFn(instance, result);
             }
+        }
+            }
+        }
+
+        internal static List<Into> LoadListWithReferences<Into, From>(this IDbCommand dbCmd, SqlExpression<From> expr = null)
+        {
+            var dialectProvider = OrmLiteConfig.DialectProvider;
+            if (expr == null)
+                expr = dialectProvider.SqlExpression<From>();
+
+            var sql = expr.SelectInto<Into>();
+            var parentResults = dbCmd.ExprConvertToList<Into>(sql);
+
+            var modelDef = ModelDefinition<Into>.Definition;
+            var fieldDefs = modelDef.AllFieldDefinitionsArray.Where(x => x.IsReference);
+
+            expr.Select(dialectProvider.GetQuotedColumnName(modelDef, modelDef.PrimaryKey));
+            var subSql = expr.ToSelectStatement();
+
+            foreach (var fieldDef in fieldDefs)
+            {
+                var listInterface = fieldDef.FieldType.GetTypeWithGenericInterfaceOf(typeof(IList<>));
+                if (listInterface != null)
+                {
+                    var refType = listInterface.GenericTypeArguments()[0];
+                    var refModelDef = refType.GetModelDefinition();
+
+                    var refField = GetRefFieldDef(modelDef, refModelDef, refType);
+
+                    var sqlRef = "SELECT {0} FROM {1} WHERE {2} IN ({3})".Fmt(
+                        dialectProvider.GetColumnNames(refModelDef),
+                        dialectProvider.GetQuotedTableName(refModelDef),
+                        dialectProvider.GetQuotedColumnName(refField),
+                        subSql);
+                    var childResults = dbCmd.ConvertToList(refType, sqlRef);
+
+                    var map = new Dictionary<object, List<object>>();
+                    List<object> refValues;
+
+                    foreach (var result in childResults)
+                    {
+                        var refValue = refField.GetValue(result);
+                        if (!map.TryGetValue(refValue, out refValues))
+                        {
+                            map[refValue] = refValues = new List<object>();
+                        }
+                        refValues.Add(result);
+                    }
+
+                    var untypedApi = dbCmd.CreateTypedApi(refType);
+                    foreach (var result in parentResults)
+                    {
+                        var pkValue = modelDef.PrimaryKey.GetValue(result);
+                        if (map.TryGetValue(pkValue, out refValues))
+                        {
+                            var castResults = untypedApi.Cast(refValues);
+                            fieldDef.SetValueFn(result, castResults);
+                        }
+                    }
+                }
+                else
+                {
+                    var refType = fieldDef.FieldType;
+                    var refModelDef = refType.GetModelDefinition();
+
+                    var refSelf = GetSelfRefFieldDefIfExists(modelDef, refModelDef);
+                    var refField = refSelf == null
+                        ? GetRefFieldDef(modelDef, refModelDef, refType)
+                        : GetRefFieldDefIfExists(modelDef, refModelDef);
+
+                    var map = new Dictionary<object, object>();
+
+                    if (refField != null)
+                    {
+                        var sqlRef = "SELECT {0} FROM {1} WHERE {2} IN ({3})".Fmt(
+                            dialectProvider.GetColumnNames(refModelDef),
+                            dialectProvider.GetQuotedTableName(refModelDef),
+                            dialectProvider.GetQuotedColumnName(refField),
+                            subSql);
+                        var childResults = dbCmd.ConvertToList(refType, sqlRef);
+
+                        foreach (var result in childResults)
+                        {
+                            var refValue = refField.GetValue(result);
+                            map[refValue] = result;
+                        }
+
+                        foreach (var result in parentResults)
+                        {
+                            object childResult;
+                            var pkValue = modelDef.PrimaryKey.GetValue(result);
+                            if (map.TryGetValue(pkValue, out childResult))
+                            {
+                                fieldDef.SetValueFn(result, childResult);
+                            }
+                        }
+                    }
+                    else if (refSelf != null)
+                    {
+                        //Load Self Table.RefTableId PK
+                        expr.Select(dialectProvider.GetQuotedColumnName(refSelf));
+                        subSql = expr.ToSelectStatement();
+
+                        var sqlRef = "SELECT {0} FROM {1} WHERE {2} IN ({3})".Fmt(
+                            dialectProvider.GetColumnNames(refModelDef),
+                            dialectProvider.GetQuotedTableName(refModelDef),
+                            dialectProvider.GetQuotedColumnName(refModelDef.PrimaryKey),
+                            subSql);
+                        var childResults = dbCmd.ConvertToList(refType, sqlRef);
+
+                        foreach (var result in childResults)
+                        {
+                            var pkValue = refModelDef.PrimaryKey.GetValue(result);
+                            map[pkValue] = result;
+                        }
+
+                        foreach (var result in parentResults)
+                        {
+                            object childResult;
+                            var fkValue = refSelf.GetValue(result);
+                            if (map.TryGetValue(fkValue, out childResult))
+                            {
+                                fieldDef.SetValueFn(result, childResult);
+                            }
+                        }
+                    }
+                }
+
+            }
+
+            return parentResults;
         }
 
         public static FieldDefinition GetRefFieldDef(ModelDefinition modelDef, ModelDefinition refModelDef, Type refType)
@@ -852,10 +1081,61 @@ namespace ServiceStack.OrmLite
 
         public static FieldDefinition GetRefFieldDefIfExists(ModelDefinition modelDef, ModelDefinition refModelDef)
         {
-            var refNameConvention = modelDef.ModelName + OrmLiteConfig.IdField;
-            var refField = refModelDef.FieldDefinitions.FirstOrDefault(x => x.FieldName == refNameConvention)
+            var refField = refModelDef.FieldDefinitions.FirstOrDefault(x => x.ForeignKey != null && x.ForeignKey.ReferenceType == modelDef.ModelType)
+                           ?? refModelDef.FieldDefinitions.FirstOrDefault(x => x.FieldName == modelDef.ModelName + OrmLiteConfig.IdField)
                            ?? refModelDef.FieldDefinitions.FirstOrDefault(x => x.Name == modelDef.Name + OrmLiteConfig.IdField);
             return refField;
+        }
+
+        public static FieldDefinition GetSelfRefFieldDefIfExists(ModelDefinition modelDef, ModelDefinition refModelDef)
+        {
+            var refField = modelDef.FieldDefinitions.FirstOrDefault(x => x.ForeignKey != null && x.ForeignKey.ReferenceType == refModelDef.ModelType)
+                        ?? modelDef.FieldDefinitions.FirstOrDefault(x => x.FieldName == refModelDef.ModelName + "Id")
+                        ?? modelDef.FieldDefinitions.FirstOrDefault(x => x.Name == refModelDef.Name + "Id");
+
+            return refField;
+    }
+
+        public static IDbDataParameter AddParam(this IDbCommand dbCmd,
+            string name,
+            object value = null,
+            ParameterDirection direction = ParameterDirection.Input,
+            DbType? dbType = null)
+        {
+            var p = dbCmd.CreateParam(name, value, direction, dbType);
+            dbCmd.Parameters.Add(p);
+            return p;
+        }
+
+        public static IDbDataParameter CreateParam(this IDbCommand dbCmd,
+            string name,
+            object value = null,
+            ParameterDirection direction = ParameterDirection.Input,
+            DbType? dbType=null)
+        {
+            var p = dbCmd.CreateParameter();
+            var dialectProvider = OrmLiteConfig.DialectProvider;
+            p.ParameterName = dialectProvider.GetParam(name);
+            p.Direction = direction;
+            if (value != null)
+            {
+                p.Value = value;
+                p.DbType = dialectProvider.GetColumnDbType(value.GetType());
+            }
+            if (dbType != null)
+                p.DbType = dbType.Value;
+            return p;
+        }
+
+        internal static IDbCommand SqlProc(this IDbCommand dbCmd, string name, object inParams = null, bool excludeDefaults = false)
+        {
+            dbCmd.CommandType = CommandType.StoredProcedure;
+            dbCmd.CommandText = name;
+            dbCmd.CommandTimeout = OrmLiteConfig.CommandTimeout;
+
+            dbCmd.SetParameters(inParams, excludeDefaults);
+
+            return dbCmd;
         }
     }
 }

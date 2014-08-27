@@ -265,6 +265,18 @@ namespace ServiceStack.OrmLite.Oracle
                 return "'" + s + "'"; // when quoted exception is more clear!
             }
 
+            if (fieldType.IsEnum)
+            {
+                var enumValue = OrmLiteConfig.DialectProvider.StringSerializer.SerializeToString(value);
+                // Oracle stores empty strings in varchar columns as null so match that behavior here
+                if (enumValue == null)
+                    return null;
+                enumValue = GetQuotedValue(enumValue.Trim('"'));
+                return enumValue == "''"
+                    ? "null"
+                    : enumValue;
+            }
+
             return base.GetQuotedValue(value, fieldType);
         }
 
@@ -346,7 +358,7 @@ namespace ServiceStack.OrmLite.Oracle
         public override void SetParameterValues<T>(IDbCommand dbCmd, object obj)
         {
             var modelDef = GetModel(typeof(T));
-            var fieldMap = modelDef.GetFieldDefinitionMap(SanitizeFieldNameForParamName);
+            var fieldMap = GetFieldDefinitionMap(modelDef);
 
             foreach (IDataParameter p in dbCmd.Parameters)
             {
@@ -1049,13 +1061,25 @@ namespace ServiceStack.OrmLite.Oracle
             if (!offset.HasValue)
                 offset = 0;
 
-            if (string.IsNullOrEmpty(orderByExpression))
+            if (string.IsNullOrEmpty(orderByExpression) && rows.HasValue)
             {
-                if (modelDef.PrimaryKey == null)
-                    throw new ApplicationException("Malformed model, no PrimaryKey defined");
-
-                orderByExpression = string.Format("ORDER BY {0}",
-                    OrmLiteConfig.DialectProvider.GetQuotedColumnName(modelDef.PrimaryKey.FieldName));
+                var primaryKey = modelDef.FieldDefinitions.FirstOrDefault(x => x.IsPrimaryKey);
+                if (primaryKey == null)
+                {
+                    if (rows.Value == 1 && offset.Value == 0)
+                    {
+                        // Probably used Single<> extension method on a table with a composite key so let it through.
+                        // Lack of an orderby expression will mean it returns a random matching row, but that is OK.
+                        orderByExpression = "";
+                    }
+                    else
+                        throw new ApplicationException("Malformed model, no PrimaryKey defined");
+                }
+                else
+                {
+                    orderByExpression = string.Format("ORDER BY {0}",
+                        OrmLiteConfig.DialectProvider.GetQuotedColumnName(primaryKey.FieldName));
+                }
             }
             sbInner.Append(" " + orderByExpression);
 

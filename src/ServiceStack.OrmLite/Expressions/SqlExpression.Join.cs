@@ -107,9 +107,9 @@ namespace ServiceStack.OrmLite
                 }
 
                 sqlExpr = "\n({0}.{1} = {2}.{3})".Fmt(
-                    SqlTable(parentDef.ModelName),
+                    DialectProvider.GetQuotedTableName(parentDef),
                     SqlColumn(parentDef.PrimaryKey.FieldName),
-                    SqlTable(childDef.ModelName),
+                    DialectProvider.GetQuotedTableName(childDef),
                     SqlColumn(refField.FieldName));
             }
 
@@ -117,7 +117,7 @@ namespace ServiceStack.OrmLite
                               ? sourceDef
                               : targetDef;
 
-            sbJoin.Append(" {0} {1} ".Fmt(joinType, SqlTable(joinDef.ModelName)));
+            sbJoin.Append(" {0} {1} ".Fmt(joinType, SqlTable(joinDef)));
             sbJoin.Append(" ON ");
             sbJoin.Append(sqlExpr);
 
@@ -140,11 +140,20 @@ namespace ServiceStack.OrmLite
 
             var sbSelect = new StringBuilder();
             var selectDef = typeof(TModel).GetModelDefinition();
+
+            var orderedDefs = tableDefs;
+            if (selectDef != modelDef && tableDefs.Contains(selectDef))
+            {
+                orderedDefs = tableDefs.ToList(); //clone
+                orderedDefs.Remove(selectDef);
+                orderedDefs.Insert(0, selectDef);
+            }
+
             foreach (var fieldDef in selectDef.FieldDefinitions)
             {
                 var found = false;
 
-                foreach (var tableDef in tableDefs)
+                foreach (var tableDef in orderedDefs)
                 {
                     foreach (var tableFieldDef in tableDef.FieldDefinitions)
                     {
@@ -155,7 +164,7 @@ namespace ServiceStack.OrmLite
                                 sbSelect.Append(", ");
 
                             sbSelect.AppendFormat("{0}.{1}",
-                                SqlTable(tableDef.ModelName),
+                                SqlTable(tableDef),
                                 tableFieldDef.GetQuotedName(DialectProvider));
                             break;
                         }
@@ -168,7 +177,7 @@ namespace ServiceStack.OrmLite
                 if (!found)
                 {
                     // Add support for auto mapping `{Table}{Field}` convention
-                    foreach (var tableDef in tableDefs)
+                    foreach (var tableDef in orderedDefs)
                     {
                         var matchingField = tableDef.FieldDefinitions
                             .FirstOrDefault(x =>

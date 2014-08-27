@@ -314,6 +314,9 @@ namespace ServiceStack.OrmLite
 
         private static int TryGuessColumnIndex(string fieldName, IDataReader dataReader)
         {
+            if (OrmLiteConfig.DisableColumnGuessFallback)
+                return NotFound;
+
             var fieldCount = dataReader.FieldCount;
             for (var i = 0; i < fieldCount; i++)
             {
@@ -680,9 +683,6 @@ namespace ServiceStack.OrmLite
                 }
                 else
                 {
-                    if (OrmLiteConfig.InsertFilter != null)
-                        OrmLiteConfig.InsertFilter(dbCmd, obj);
-
                     dbCmd.Insert(obj);
                 }
 
@@ -691,9 +691,6 @@ namespace ServiceStack.OrmLite
                 
                 return true;
             }
-
-            if (OrmLiteConfig.UpdateFilter != null)
-                OrmLiteConfig.UpdateFilter(dbCmd, obj);
 
             dbCmd.Update(obj);
             

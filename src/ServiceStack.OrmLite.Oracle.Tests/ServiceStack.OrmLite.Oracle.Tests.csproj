@@ -75,6 +75,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\CompositeKeyTests.cs">
+      <Link>CompositeKeyTests.cs</Link>
+    </Compile>
     <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\CustomSqlTests.cs">
       <Link>CustomSqlTests.cs</Link>
     </Compile>
@@ -101,6 +104,9 @@
     </Compile>
     <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\Expression\ExpressionsTestBase.cs">
       <Link>Expression\ExpressionsTestBase.cs</Link>
+    </Compile>
+    <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\Expression\ExpressionUsingCustomSerializedEnumTests.cs">
+      <Link>Expression\ExpressionUsingCustomSerializedEnumTests.cs</Link>
     </Compile>
     <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\Expression\LogicalExpressionsTest.cs">
       <Link>Expression\LogicalExpressionsTest.cs</Link>
@@ -150,9 +156,6 @@
     <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\MockAllApiTests.cs">
       <Link>MockAllApiTests.cs</Link>
     </Compile>
-    <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\NorthwindPerfTests.cs">
-      <Link>NorthwindPerfTests.cs</Link>
-    </Compile>
     <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\OrmLiteBasicPersistenceProviderTests.cs">
       <Link>OrmLiteBasicPersistenceProviderTests.cs</Link>
     </Compile>
@@ -188,9 +191,6 @@
     </Compile>
     <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\OrmLiteInsertTests.cs">
       <Link>OrmLiteInsertTests.cs</Link>
-    </Compile>
-    <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\OrmLiteNorthwindTests.cs">
-      <Link>OrmLiteNorthwindTests.cs</Link>
     </Compile>
     <Compile Include="..\..\tests\ServiceStack.OrmLite.Tests\OrmLiteQueryTests.cs">
       <Link>OrmLiteQueryTests.cs</Link>

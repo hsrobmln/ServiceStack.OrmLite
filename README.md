@@ -1,9 +1,7 @@
 [Join the ServiceStack Google+ group](https://plus.google.com/u/0/communities/112445368900682590445) or
 follow [@servicestack](http://twitter.com/servicestack) for updates.
 
-# A Fast Micro ORM for .NET
-
-# Introduction
+# A Fast, Simple, Typed ORM for .NET
 
 OrmLite's goal is to provide a convenient, DRY, config-free, RDBMS-agnostic typed wrapper that retains a high affinity with SQL, exposing intuitive APIs that generate predictable SQL and maps cleanly to (DTO-friendly) disconnected POCO's. This approach makes easier to reason-about your data access making it obvious what SQL is getting executed at what time, whilst mitigating unexpected behavior, implicit N+1 queries and leaky data access prevalent in Heavy ORMs.
 
@@ -284,7 +282,7 @@ db.Insert(new Person { Id = 1, FirstName = "Jimi", LastName = "Hendrix", Age = 2
 But do provide an API that takes an Expression Visitor for the rare cases you don't want to insert every field
 
 ```csharp
-db.InsertOnly(new Person { FirstName = "Amy" }, q => q.Insert(p => new {p.FirstName} ));
+db.InsertOnly(new Person { FirstName = "Amy" }, q => q.Insert(p => new {p.FirstName}))
 ```
 **INSERT INTO "Person" ("FirstName") VALUES ('Amy')**
 
@@ -479,6 +477,41 @@ class CustomerAddress {
 }
 ```
 
+### Self References
+
+Self References are also supported for **1:1** relations where the Foreign Key can instead be on the parent table:
+
+```csharp
+public class Customer
+{
+    ...
+    public int CustomerAddressId { get; set; }
+
+    [Reference]
+    public CustomerAddress PrimaryAddress { get; set; }
+}
+```
+
+### Foreign Key and References Attributes
+
+References that don't follow the above naming conventions can be declared explicitly using
+the `[References]` and `[ForeignKey]` attributes:
+
+```csharp
+public class Customer
+{
+    [References(typeof(CustomerAddress))]
+    public int PrimaryAddressId { get; set; }
+
+    [Reference]
+    public CustomerAddress PrimaryAddress { get; set; }
+}
+```
+
+> Reference Attributes take precedence over naming conventions
+
+### Implicit Reference Conventions are applied by default
+
 The implicit relationship above allows you to use any of these equilvalent APIs to JOIN tables:
 
 ```csharp
@@ -560,7 +593,7 @@ public class CustomerAddress
 {
     [AutoIncrement]
     public int Id { get; set; }
-    public int CustomerId { get; set; } // `{Parent}Id` convention to reference Customer
+    public int CustomerId { get; set; } //`{Parent}Id` convention to refer to Customer
     public string AddressLine1 { get; set; }
     public string AddressLine2 { get; set; }
     public string City { get; set; }
@@ -572,7 +605,7 @@ public class Order
 {
     [AutoIncrement]
     public int Id { get; set; }
-    public int CustomerId { get; set; } // `{Parent}Id` convention to reference Customer
+    public int CustomerId { get; set; } //`{Parent}Id` convention to refer to Customer
     public string LineItem { get; set; }
     public int Qty { get; set; }
     public decimal Cost { get; set; }
@@ -598,6 +631,20 @@ db.Save(customer, references:true);
 ```
 
 This saves the root customer POCO in the `Customer` table, its related PrimaryAddress in the `CustomerAddress` table and its 2 Orders in the `Order` table.
+
+### Querying POCO's with References
+
+The `Load*` API's are used to automatically load a POCO and all it's child references, e.g:
+
+```csharp
+var customer = db.LoadSingleById<Customer>(customerId);
+```
+
+Using Typed SqlExpressions:
+
+```csharp
+var customers = db.LoadSelect<Customer>(q => q.Name == "Customer 1");
+```
 
 More examples available in [LoadReferencesTests.cs](https://github.com/ServiceStack/ServiceStack.OrmLite/blob/master/tests/ServiceStack.OrmLite.Tests/LoadReferencesTests.cs)
 
@@ -737,7 +784,9 @@ The Result Filters also lets you easily mock results and avoid hitting the datab
 ```csharp
 using (new OrmLiteResultsFilter {
     PrintSql = true,
-    SingleResult = new Person { Id = 1, FirstName = "Mocked", LastName = "Person", Age = 100 },
+    SingleResult = new Person { 
+      Id = 1, FirstName = "Mocked", LastName = "Person", Age = 100 
+    },
 })
 {
     db.Single<Person>(x => x.Age == 42).FirstName // Mocked
@@ -937,33 +986,24 @@ typedRow = db.SingleById<Target>(1); //= null
 
 ## T4 Template Support
 
-[Guru Kathiresan](https://github.com/gkathire) continues to enhance [OrmLite's T4 Template support](https://github.com/ServiceStack/ServiceStack.OrmLite/tree/master/src/T4) which are useful when you want to automatically generate POCO's and strong-typed wrappers for executing stored procedures. OrmLite's T4 support can be added via NuGet with:
+[OrmLite's T4 Template](https://github.com/ServiceStack/ServiceStack.OrmLite/tree/master/src/T4) 
+are useful in database-first development or when wanting to use OrmLite with an existing
+RDBMS by automatically generating POCO's and strong-typed wrappers 
+for executing stored procedures. 
+
+OrmLite's T4 support can be added via NuGet with:
 
     PM> Install-Package ServiceStack.OrmLite.T4
 
-## Custom SQL API's
+## Typed SqlExpressions with Custom SQL APIs
 
-Custom SQL API's provide a convenient way for executing custom sql and mapping to , e.g:
-
-```csharp
-List<Poco> results = db.SqlList<Poco>("EXEC GetAnalyticsForWeek 1");
-List<Poco> results = db.SqlList<Poco>("EXEC GetAnalyticsForWeek @weekNo", new { weekNo = 1 });
-
-List<int> results = db.SqlList<int>("EXEC GetTotalsForWeek 1");
-List<int> results = db.SqlList<int>("EXEC GetTotalsForWeek @weekNo", new { weekNo = 1 });
-
-int result = db.SqlScalar<int>("SELECT 10");
-```
-
-More examples can be found in [SqlServerProviderTests](https://github.com/ServiceStack/ServiceStack.OrmLite/blob/master/tests/ServiceStack.OrmLite.Tests/SqlServerProviderTests.cs).
-
-### Using typed SqlExpression in Custom SQL APIs
-
-The Custom SQL API's also allow querying with Typed SQL Expressions:
+The Custom SQL API's allow you to map custom SqlExpressions into different responses:
 
 ```csharp
-List<Person> results = db.SqlList<Person>(db.From<Person>().Select("*").Where(q => q.Age < 50));
-List<Person> results = db.SqlList<Person>("SELECT * FROM Person WHERE Age < @age", new { age=50});
+List<Person> results = db.SqlList<Person>(
+    db.From<Person>().Select("*").Where(q => q.Age < 50));
+List<Person> results = db.SqlList<Person>(
+    "SELECT * FROM Person WHERE Age < @age", new { age=50});
 
 List<string> results = db.SqlColumn<string>(db.From<Person>().Select(x => x.LastName));
 List<string> results = db.SqlColumn<string>("SELECT LastName FROM Person");
@@ -971,9 +1011,65 @@ List<string> results = db.SqlColumn<string>("SELECT LastName FROM Person");
 HashSet<int> results = db.ColumnDistinct<int>(db.From<Person>().Select(x => x.Age));
 HashSet<int> results = db.ColumnDistinct<int>("SELECT Age FROM Person");
 
-int result = db.SqlScalar<int>(db.From<Person>().Select(Sql.Count("*")).Where(q => q.Age < 50));
+int result = db.SqlScalar<int>(
+    db.From<Person>().Select(Sql.Count("*")).Where(q => q.Age < 50));
 int result = db.SqlScalar<int>("SELCT COUNT(*) FROM Person WHERE Age < 50");
 ```
+
+## Stored Procedures using Custom Raw SQL API's
+
+The Raw SQL API's provide a convenient way for mapping results of any Custom SQL like
+executing Stored Procedures:
+
+```csharp
+List<Poco> results = db.SqlList<Poco>("EXEC GetAnalyticsForWeek 1");
+List<Poco> results = db.SqlList<Poco>(
+    "EXEC GetAnalyticsForWeek @weekNo", new { weekNo = 1 });
+
+List<int> results = db.SqlList<int>("EXEC GetTotalsForWeek 1");
+List<int> results = db.SqlList<int>(
+    "EXEC GetTotalsForWeek @weekNo", new { weekNo = 1 });
+
+int result = db.SqlScalar<int>("SELECT 10");
+```
+
+### Stored Procedures with output params
+
+The `SqlProc` API provides even greater customization by letting you modify the underlying
+ADO.NET Stored Procedure call by returning a prepared `IDbCommand` allowing for 
+advanced customization like setting and retriving OUT parameters, e.g:
+
+```csharp
+string spSql = @"DROP PROCEDURE IF EXISTS spSearchLetters;
+    CREATE PROCEDURE spSearchLetters (IN pLetter varchar(10), OUT pTotal int)
+    BEGIN
+        SELECT COUNT(*) FROM LetterFrequency WHERE Letter = pLetter INTO pTotal;
+        SELECT * FROM LetterFrequency WHERE Letter = pLetter;
+    END";
+
+db.ExecuteSql(spSql);
+
+var cmd = db.SqlProc("spSearchLetters", new { pLetter = "C" });
+var pTotal = cmd.AddParam("pTotal", direction: ParameterDirection.Output);
+
+var results = cmd.ConvertToList<LetterFrequency>();
+var total = pTotal.Value;
+```
+
+An alternative approach is to use `SqlList` which lets you use a filter to customize a 
+Stored Procedure or any other command type, e.g:
+
+```csharp
+IDbDataParameter pTotal = null;
+var results = db.SqlList<LetterFrequency>("spSearchLetters", cmd => {
+        cmd.CommandType = CommandType.StoredProcedure;
+        cmd.AddParam("pLetter", "C");
+        pTotal = cmd.AddParam("pTotal", direction: ParameterDirection.Output);
+    });
+var total = pTotal.Value;
+```
+
+More examples can be found in [SqlServerProviderTests](https://github.com/ServiceStack/ServiceStack.OrmLite/blob/master/tests/ServiceStack.OrmLite.Tests/SqlServerProviderTests.cs).
 
 ## New Foreign Key attribute for referential actions on Update/Deletes
 
@@ -1373,30 +1469,30 @@ public class ShipperTypeCount
 Creating tables is a simple 1-liner:
 
 ```csharp
-	using (IDbConnection db = ":memory:".OpenDbConnection())
-	{
-      db.CreateTable<ShipperType>();
-      db.CreateTable<Shipper>();
-	}
+using (IDbConnection db = ":memory:".OpenDbConnection())
+{
+    db.CreateTable<ShipperType>();
+    db.CreateTable<Shipper>();
+}
 
-	/* In debug mode the line above prints:
-  DEBUG: CREATE TABLE "ShipperTypes" 
-  (
-    "ShipperTypeID" INTEGER PRIMARY KEY AUTOINCREMENT, 
-    "Name" VARCHAR(40) NOT NULL 
-  );
-  DEBUG: CREATE UNIQUE INDEX uidx_shippertypes_name ON "ShipperTypes" ("Name" ASC);
-	DEBUG: CREATE TABLE "Shippers" 
-	(
-	  "ShipperID" INTEGER PRIMARY KEY AUTOINCREMENT, 
-	  "CompanyName" VARCHAR(40) NOT NULL, 
-	  "Phone" VARCHAR(24) NULL, 
-	  "ShipperTypeId" INTEGER NOT NULL, 
+/* In debug mode the line above prints:
+DEBUG: CREATE TABLE "ShipperTypes" 
+(
+  "ShipperTypeID" INTEGER PRIMARY KEY AUTOINCREMENT, 
+  "Name" VARCHAR(40) NOT NULL 
+);
+DEBUG: CREATE UNIQUE INDEX uidx_shippertypes_name ON "ShipperTypes" ("Name" ASC);
+DEBUG: CREATE TABLE "Shippers" 
+(
+  "ShipperID" INTEGER PRIMARY KEY AUTOINCREMENT, 
+  "CompanyName" VARCHAR(40) NOT NULL, 
+  "Phone" VARCHAR(24) NULL, 
+  "ShipperTypeId" INTEGER NOT NULL, 
 
-	  CONSTRAINT "FK_Shippers_ShipperTypes" FOREIGN KEY ("ShipperTypeId") REFERENCES "ShipperTypes" ("ShipperID") 
-	);
-	DEBUG: CREATE UNIQUE INDEX uidx_shippers_companyname ON "Shippers" ("CompanyName" ASC);
-	*/
+  CONSTRAINT "FK_Shippers_ShipperTypes" FOREIGN KEY ("ShipperTypeId") REFERENCES "ShipperTypes" ("ShipperID") 
+);
+DEBUG: CREATE UNIQUE INDEX uidx_shippers_companyname ON "Shippers" ("CompanyName" ASC);
+*/
 ```
 
 ### Transaction Support

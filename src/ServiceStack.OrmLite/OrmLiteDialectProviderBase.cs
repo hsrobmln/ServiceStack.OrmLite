@@ -89,8 +89,6 @@ namespace ServiceStack.OrmLite
 
         public IOrmLiteExecFilter ExecFilter { get; set; }
 
-        private static ILog log = LogManager.GetLogger(typeof(OrmLiteDialectProviderBase<>));
-
         public string StringLengthNonUnicodeColumnDefinitionFormat = "VARCHAR({0})";
         public string StringLengthUnicodeColumnDefinitionFormat = "NVARCHAR({0})";
 
@@ -711,7 +709,7 @@ namespace ServiceStack.OrmLite
         public virtual void SetParameterValues<T>(IDbCommand dbCmd, object obj)
         {
             var modelDef = GetModel(typeof(T));
-            var fieldMap = modelDef.GetFieldDefinitionMap(SanitizeFieldNameForParamName);
+            var fieldMap = GetFieldDefinitionMap(modelDef);
 
             foreach (IDataParameter p in dbCmd.Parameters)
             {
@@ -726,6 +724,11 @@ namespace ServiceStack.OrmLite
             }
         }
 
+        public Dictionary<string, FieldDefinition> GetFieldDefinitionMap(ModelDefinition modelDef)
+        {
+            return modelDef.GetFieldDefinitionMap(SanitizeFieldNameForParamName);
+        }
+
         public virtual void SetParameterValue<T>(FieldDefinition fieldDef, IDataParameter p, object obj)
         {
             var value = GetValueOrDbNull<T>(fieldDef, obj);
@@ -738,12 +741,17 @@ namespace ServiceStack.OrmLite
                ? fieldDef.GetValue(obj)
                : GetAnonValue<T>(fieldDef, obj);
 
+            return GetFieldValue(fieldDef, value);
+        }
+
+        public object GetFieldValue(FieldDefinition fieldDef, object value)
+        {
             if (value != null)
             {
                 if (fieldDef.IsRefType)
                 {
                     //Let ADO.NET providers handle byte[]
-                    if (fieldDef.FieldType == typeof(byte[]))
+                    if (fieldDef.FieldType == typeof (byte[]))
                     {
                         return value;
                     }
@@ -752,13 +760,19 @@ namespace ServiceStack.OrmLite
                 if (fieldDef.FieldType.IsEnum)
                 {
                     var enumValue = OrmLiteConfig.DialectProvider.StringSerializer.SerializeToString(value);
-                    return enumValue != null
-                        ? enumValue.Trim('"')
-                        : null;
+                    if (enumValue == null)
+                        return null;
+
+                    enumValue = enumValue.Trim('"');
+                    long intEnum;
+                    if (Int64.TryParse(enumValue, out intEnum))
+                        return intEnum;
+                    
+                    return enumValue;
                 }
-                if (fieldDef.FieldType == typeof(TimeSpan))
+                if (fieldDef.FieldType == typeof (TimeSpan))
                 {
-                    var timespan = (TimeSpan)value;
+                    var timespan = (TimeSpan) value;
                     return timespan.Ticks;
                 }
             }
@@ -1325,7 +1339,7 @@ namespace ServiceStack.OrmLite
             }
             catch (Exception)
             {
-                log.ErrorFormat("Error ConvertDbValue trying to convert {0} into {1}", value, type.Name);
+                Log.ErrorFormat("Error ConvertDbValue trying to convert {0} into {1}", value, type.Name);
                 throw;
             }
         }
@@ -1338,6 +1352,22 @@ namespace ServiceStack.OrmLite
             if (fieldType.IsRefType())
             {
                 return dialectProvider.GetQuotedValue(dialectProvider.StringSerializer.SerializeToString(value));
+            }
+
+            if (fieldType.IsEnum)
+            {
+                var isEnumFlags = fieldType.IsEnumFlags();
+                long enumValue;
+                if (!isEnumFlags && Int64.TryParse(value.ToString(), out enumValue))
+                {
+                    value = Enum.ToObject(fieldType, enumValue).ToString();
+                }
+
+                var enumString = dialectProvider.StringSerializer.SerializeToString(value);
+
+                return !isEnumFlags
+                    ? dialectProvider.GetQuotedValue(enumString.Trim('"'))
+                    : enumString;
             }
 
             var typeCode = fieldType.GetTypeCode();
@@ -1365,7 +1395,7 @@ namespace ServiceStack.OrmLite
 
             if (fieldType == typeof(TimeSpan))
                 return ((TimeSpan)value).Ticks.ToString(CultureInfo.InvariantCulture);
-
+ 
             return ShouldQuoteValue(fieldType)
                     ? dialectProvider.GetQuotedValue(value.ToString())
                     : value.ToString();

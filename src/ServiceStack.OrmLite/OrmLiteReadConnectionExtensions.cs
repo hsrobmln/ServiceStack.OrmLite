@@ -240,6 +240,24 @@ namespace ServiceStack.OrmLite
 
         /// <summary>
         /// Returns the first column in a List using a SqlFormat query. E.g:
+        /// <para>db.ColumnLazy&lt;string&gt;("SELECT LastName FROM Person WHERE Age = @age", new { age = 27 })</para>
+        /// </summary>
+        public static IEnumerable<T> ColumnLazy<T>(this IDbConnection dbConn, string sql, object anonType = null)
+        {
+            return dbConn.ExecLazy(dbCmd => dbCmd.ColumnLazy<T>(sql, anonType));
+        }
+
+        /// <summary>
+        /// Returns the distinct first column values in a HashSet using an SqlExpression. E.g:
+        /// <para>db.ColumnLazy&lt;int&gt;(db.From&lt;Persion&gt;().Select(x => x.LastName).Where(q => q.Age == 27))</para>
+        /// </summary>
+        public static IEnumerable<T> ColumnLazy<T>(this IDbConnection dbConn, ISqlExpression query)
+        {
+            return dbConn.ExecLazy(dbCmd => dbCmd.ColumnLazy<T>(query.ToSelectStatement()));
+        }
+
+        /// <summary>
+        /// Returns the first column in a List using a SqlFormat query. E.g:
         /// <para>db.Column&lt;string&gt;("SELECT LastName FROM Person WHERE Age = @age", new { age = 27 })</para>
         /// </summary>
         public static List<T> Column<T>(this IDbConnection dbConn, string sql, object anonType = null)
@@ -417,6 +435,24 @@ namespace ServiceStack.OrmLite
         public static List<T> SqlList<T>(this IDbConnection dbConn, string sql, Dictionary<string, object> dict)
         {
             return dbConn.Exec(dbCmd => dbCmd.SqlList<T>(sql, dict));
+        }
+
+        /// <summary>
+        /// Returns results from an arbitrary parameterized raw sql query with a dbCmd filter. E.g:
+        /// <para>db.SqlList&lt;Person&gt;("EXEC GetRockstarsAged @age", dbCmd => ...)</para>
+        /// </summary>
+        public static List<T> SqlList<T>(this IDbConnection dbConn, string sql, Action<IDbCommand> dbCmdFilter)
+        {
+            return dbConn.Exec(dbCmd => dbCmd.SqlList<T>(sql, dbCmdFilter));
+        }
+
+        /// <summary>
+        /// Prepare Stored Procedure with Input parameters, optionally populated with Input Params. E.g:
+        /// <para>var cmd = db.SqlProc("GetRockstarsAged", new { age = 42 })</para>
+        /// </summary>
+        public static IDbCommand SqlProc(this IDbConnection dbConn, string name, object inParams = null, bool excludeDefaults = false)
+        {
+            return dbConn.Exec(dbCmd => dbCmd.SqlProc(name, inParams, excludeDefaults));
         }
 
         /// <summary>
